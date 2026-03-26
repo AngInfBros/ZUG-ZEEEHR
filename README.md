@@ -1,2 +1,3 @@
 # ZUG-ZEEEHR
-hello world
+
+print("hello world")
