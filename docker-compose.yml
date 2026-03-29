@@ -1,5 +1,5 @@
 services:
   api:
-    build: .
+    build: ./api_connector
     ports:
       - "5000:5000"
