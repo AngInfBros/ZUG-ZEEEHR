@@ -39,10 +39,13 @@ def sync_trains():
                 updated_at = CURRENT_TIMESTAMP
         """
 
-        # SQL für das Archiv: Speichert Züge permanent, wenn die Verspätung hoch ist
+        # SQL für das Archiv: Speichert Züge permanent. Falls existent, update auf die maximale Verspätung.
         archive_query = """
             INSERT INTO delay_archive (trip_id, origin, destination, delay, route_data)
             VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE 
+                delay = GREATEST(delay, VALUES(delay)),
+                recorded_at = CURRENT_TIMESTAMP
         """
 
         sync_count = 0

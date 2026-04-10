@@ -15,13 +15,14 @@ CREATE TABLE active_trains (
 );
 
 -- 2. ARCHIV-TABELLE (Permanent für Verspätungen > 20 Min)
+-- 2. ARCHIV-TABELLE (Permanent für Verspätungen > 20 Min)
 DROP TABLE IF EXISTS delay_archive;
 CREATE TABLE delay_archive (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    trip_id VARCHAR(50),
+    trip_id VARCHAR(50) UNIQUE, -- WICHTIG: Verhindert doppelte Einträge!
     origin VARCHAR(100),
     destination VARCHAR(100),
     delay INT,
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Wann wurde der Fehler geloggt?
-    route_data JSON                  -- Damit man die Strecke auch später noch sieht
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    route_data JSON
 );

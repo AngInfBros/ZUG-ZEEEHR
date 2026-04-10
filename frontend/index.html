@@ -192,6 +192,23 @@
             background-color: #cc0000;
         }
 
+        .city-label {
+            background-color: transparent;
+            border: none;
+            box-shadow: none;
+            color: var(--sbb-anthracite);
+            font-weight: 700;
+            font-size: 0.75rem;
+            /* Ein leichter weisser Schatten, damit die Schrift auf jedem Hintergrund lesbar bleibt */
+            text-shadow: 1px 1px 3px rgba(255, 255, 255, 0.9), -1px -1px 3px rgba(255, 255, 255, 0.9);
+            opacity: 0.6; /* Hier stellen wir die Durchsichtigkeit ein (0.0 bis 1.0) */
+        }
+
+        .city-label::before,
+        .city-label::after {
+            display: none !important;
+        }
+
         @media (max-width: 600px) {
             .stats-panel {
                 width: calc(100% - 40px);
@@ -211,8 +228,7 @@
         <div class="logo">SBB CFF FFS | Live Radar</div>
         <div class="btn-group">
             <span id="status-text" style="font-size: 0.75rem; color: var(--sbb-grey);">Bereit</span>
-            <button onclick="triggerBackendSync()" class="btn btn-sync">1. Daten via Backend synchronisieren</button>
-            <button onclick="loadDelaysFromBackend()" class="btn btn-live">2. Live Verspätungen anzeigen</button>
+            <button onclick="triggerBackendSync()" class="btn btn-live"> Radar aktualisieren</button>
         </div>
     </header>
 
@@ -306,6 +322,12 @@
                 // Frontend holt Daten NUR aus dem Backend (view-live Route)
                 const response = await fetch(`${BACKEND_URL}/view-live`);
                 const trains = await response.json();
+
+                trains.sort((a, b) => {
+                    const delayA = parseInt(a.delay) || 0;
+                    const delayB = parseInt(b.delay) || 0;
+                    return delayB - delayA; // Höchste Zahl zuerst
+                });
                 
                 let delayedCount = 0;
                 let maxDelay = 0;
@@ -336,10 +358,9 @@
                         // Zug auf der Karte einzeichnen (nutzt die Koordinaten aus der Datenbank)
                         if (train.latitude && train.longitude) {
                             const marker = L.circleMarker([train.latitude, train.longitude], {
-                                radius: 8 + (delay / 4), // Grösse abhängig von der Verspätung
+                                radius: 8 + (delay / 4),
                                 fillColor: "var(--sbb-red)",
-                                color: "#fff",
-                                weight: 2,
+                                stroke: false,
                                 fillOpacity: 0.7
                             }).addTo(map);
 
@@ -350,6 +371,13 @@
                                 Von: ${train.origin}<br>
                                 Nach: ${train.destination}
                             `);
+
+                            marker.bindTooltip(train.origin, {
+                                permanent: true,           // Label bleibt immer sichtbar
+                                direction: 'right',        // Zeigt rechts vom roten Punkt an
+                                className: 'city-label',   // Nutzt unser neues CSS
+                                offset: [10, 0]            // Schiebt den Text leicht nach rechts weg vom Kreis
+                            });
                             
                             markers.push(marker);
                         }
@@ -382,6 +410,7 @@
         // Karte initialisieren, wenn die Seite geladen wird
         window.onload = () => {
             initMap();
+            loadDelaysFromBackend(); // <-- Diese Zeile ist neu!
         };
     </script>
 </body>

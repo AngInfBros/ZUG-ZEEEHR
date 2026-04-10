@@ -24,5 +24,12 @@ services:
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
       - mysql_data:/var/lib/mysql
 
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80" # Das Frontend ist nun über http://localhost erreichbar (Port 80 ist Standard)
+    depends_on:
+      - backend
+
 volumes:
   mysql_data:
