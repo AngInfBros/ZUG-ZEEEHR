@@ -111,12 +111,6 @@
             overflow-y: auto;
         }
 
-        #train-list-container h3 {
-            color: var(--sbb-anthracite);
-            margin-bottom: 1rem;
-            font-size: 1.1rem;
-        }
-
         #train-list {
             list-style: none;
         }
@@ -138,15 +132,29 @@
             font-size: 0.9rem;
         }
 
-        .btn-live {
-            background-color: var(--sbb-red);
-            color: var(--sbb-white);
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn {
             border: none;
             padding: 0.6rem 1.2rem;
             cursor: pointer;
             font-weight: 600;
             font-size: 0.85rem;
             border-radius: var(--border-radius);
+            transition: all 0.2s;
+        }
+
+        .btn-live {
+            background-color: var(--sbb-red);
+            color: var(--sbb-white);
+        }
+
+        .btn-live:hover {
+            background-color: #cc0000;
         }
 
         .city-label {
@@ -156,11 +164,16 @@
             color: var(--sbb-anthracite);
             font-weight: 700;
             font-size: 0.75rem;
-            text-shadow: 1px 1px 3px white;
-            opacity: 0.7;
+            text-shadow: 1px 1px 3px rgba(255, 255, 255, 0.9);
+            opacity: 0.8;
         }
 
         .city-label::before { display: none !important; }
+
+        @media (max-width: 600px) {
+            .stats-panel { width: calc(100% - 40px); left: 20px; }
+            #train-list-container { height: 200px; }
+        }
     </style>
 </head>
 <body>
@@ -168,8 +181,8 @@
     <header>
         <div class="logo">SBB CFF FFS | Live Radar</div>
         <div class="btn-group">
-            <span id="status-text" style="font-size: 0.75rem; color: var(--sbb-grey); margin-right: 10px;">Bereit</span>
-            <button onclick="triggerBackendSync()" class="btn-live">Radar aktualisieren</button>
+            <span id="status-text" style="font-size: 0.75rem; color: var(--sbb-grey);">Bereit</span>
+            <button onclick="triggerBackendSync()" class="btn btn-live"> Radar aktualisieren</button>
         </div>
     </header>
 
@@ -179,43 +192,52 @@
             <div id="delayed-count" class="count-value">0</div>
             <div class="sub-label">Verspätete Züge (Live)</div>
             <div id="worst-connection" style="font-size: 0.85rem; border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
-                Warte auf Datenabruf...
+                Initialisiere...
             </div>
         </div>
 
         <div id="map"></div>
         
         <div id="train-list-container">
-            <h3>Liste der verspäteten Züge</h3>
+            <h3>Verspätete Züge im Netz</h3>
             <ul id="train-list">
-                <li style="color: var(--sbb-grey); border: none;">Noch keine Daten geladen.</li>
+                <li style="color: var(--sbb-grey); border: none;">Lade aktuelle Daten...</li>
             </ul>
         </div>
     </main>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        // BACKEND KONFIGURATION
         const BACKEND_URL = 'http://localhost:8080';
+        
         let map;
         let markers = [];
 
         function initMap() {
-            map = L.map('map', {
-                zoomControl: true,
+            const bounds = [[45.8, 5.9], [47.8, 10.5]];
+            map = L.map('map', { 
+                zoomControl: true, 
                 attributionControl: false,
-                minZoom: 7
+                maxBounds: bounds,
+                maxBoundsViscosity: 1.0,
+                minZoom: 7 
             }).setView([46.8182, 8.2275], 8);
 
             L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png').addTo(map);
         }
 
         async function triggerBackendSync() {
-            document.getElementById('status-text').innerText = "Sync läuft...";
+            const statusText = document.getElementById('status-text');
+            statusText.innerText = "Sync läuft...";
             try {
-                await fetch(`${BACKEND_URL}/sync-trains`);
+                const response = await fetch(`${BACKEND_URL}/sync-trains`);
+                const data = await response.json();
+                console.log("Sync Result:", data.message);
                 loadDelaysFromBackend();
             } catch (error) {
-                document.getElementById('status-text').innerText = "Sync Fehler!";
+                console.error("Sync Error:", error);
+                statusText.innerText = "Sync fehlgeschlagen!";
             }
         }
 
@@ -223,15 +245,19 @@
             const statusText = document.getElementById('status-text');
             const countDisplay = document.getElementById('delayed-count');
             const worstDisplay = document.getElementById('worst-connection');
-            const trainListDisplay = document.getElementById('train-list');
+            const trainListDisplay = document.getElementById('train-list'); 
             
-            statusText.innerText = "Lade Live-Daten...";
+            statusText.innerText = "Daten werden geladen...";
+
+            // Marker aufräumen
             markers.forEach(m => map.removeLayer(m));
             markers = [];
-            trainListDisplay.innerHTML = '';
+            trainListDisplay.innerHTML = ''; 
 
             try {
                 const response = await fetch(`${BACKEND_URL}/view-live`);
+                if (!response.ok) throw new Error("Backend nicht erreichbar");
+                
                 const trains = await response.json();
 
                 // Sortierung: Höchste Verspätung zuerst
@@ -240,42 +266,47 @@
                 let delayedCount = 0;
                 let maxDelay = 0;
                 let worstTrain = null;
-                
-                // Zeit-Schwellenwert: 10 Minuten (in Millisekunden)
-                const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
                 trains.forEach(train => {
                     const delay = parseInt(train.delay) || 0;
-                    const updatedAt = new Date(train.updated_at);
-
-                    // --- FRESHNESS FILTER ---
-                    // Ignoriere Züge, die nicht in den letzten 10 Min. aktualisiert wurden (Archiv-Leichen)
-                    if (updatedAt < tenMinutesAgo) return;
-
+                    
                     if (delay > 0) {
                         delayedCount++;
+                        
                         if (delay > maxDelay) {
                             maxDelay = delay;
                             worstTrain = train;
                         }
 
+                        // TripID splitten (Erwartet Format: NAME_ZIEL)
+                        const trainName = train.trip_id.includes('_') ? train.trip_id.split('_')[0] : train.trip_id;
+
                         // Liste befüllen
-                        const trainName = train.trip_id.split('_')[0];
                         const listItem = document.createElement('li');
                         listItem.innerHTML = `
-                            <span><strong>${trainName}</strong> | ${train.origin} &rarr; ${train.destination}</span>
+                            <span><strong>${trainName}</strong> | ${train.origin} &rarr; ${train.destination}</span> 
                             <span class="list-delay">+${delay} Min.</span>
                         `;
                         trainListDisplay.appendChild(listItem);
 
-                        // Marker auf Karte (nutzt Bahnhofs-Koordinaten aus DB)
+                        // Marker auf Karte setzen
                         if (train.latitude && train.longitude) {
-                            const marker = L.circleMarker([train.latitude, train.longitude], {
-                                radius: 6, // Fixer Radius für sauberes Bild
+                            const lat = parseFloat(train.latitude);
+                            const lon = parseFloat(train.longitude);
+
+                            const marker = L.circleMarker([lat, lon], {
+                                radius: 7 + (delay / 3),
                                 fillColor: "var(--sbb-red)",
-                                stroke: false,
+                                color: "white",
+                                weight: 2,
                                 fillOpacity: 0.8
                             }).addTo(map);
+
+                            marker.bindPopup(`
+                                <div style="color:var(--sbb-red); font-weight:bold; border-bottom:1px solid #eee; margin-bottom:5px;">${trainName}</div>
+                                <b>Verspätung: +${delay} Min.</b><br>
+                                Ziel: ${train.destination}
+                            `);
 
                             marker.bindTooltip(train.origin, {
                                 permanent: true,
@@ -283,28 +314,39 @@
                                 className: 'city-label',
                                 offset: [10, 0]
                             });
+                            
                             markers.push(marker);
                         }
                     }
                 });
 
+                // UI Updates
                 countDisplay.innerText = delayedCount;
                 if (worstTrain) {
-                    const trainName = worstTrain.trip_id.split('_')[0];
-                    worstDisplay.innerHTML = `<strong>Maximum: +${maxDelay} Min</strong><br>${trainName} nach ${worstTrain.destination}`;
+                    const worstName = worstTrain.trip_id.split('_')[0];
+                    worstDisplay.innerHTML = `<strong>Grösste Verspätung: +${maxDelay} Min</strong><br>${worstName} nach ${worstTrain.destination}`;
                 } else {
-                    worstDisplay.innerHTML = "Keine aktuellen Verspätungen.";
-                    trainListDisplay.innerHTML = '<li>Keine verspäteten Züge im aktuellen Zeitfenster.</li>';
+                    worstDisplay.innerHTML = "Aktuell keine Verspätungen gemeldet.";
                 }
-                statusText.innerText = "Live";
+
+                if (delayedCount === 0) {
+                    trainListDisplay.innerHTML = '<li style="color: var(--sbb-grey); border: none;">Alle Züge sind pünktlich.</li>';
+                }
+
+                statusText.innerText = "Daten aktuell";
+
             } catch (error) {
-                statusText.innerText = "Fehler!";
+                console.error("Fetch Error:", error);
+                statusText.innerText = "Fehler beim Laden!";
+                trainListDisplay.innerHTML = '<li style="color: var(--sbb-red); border: none;">Backend Verbindung fehlgeschlagen.</li>';
             }
         }
 
         window.onload = () => {
             initMap();
             loadDelaysFromBackend();
+            // Optional: Alle 60 Sekunden automatisch aktualisieren
+            // setInterval(loadDelaysFromBackend, 60000);
         };
     </script>
 </body>
