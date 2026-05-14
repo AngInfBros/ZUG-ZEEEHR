@@ -274,14 +274,14 @@
                     throw new Error(`Backend-Fehler: HTTP ${response.status}`);
                 }
                 
-                const trains = await response.json();
+                const data = await response.json();
+                const trains = data.live_trains || [];
+                const archiveWorst = data.archive_worst;
 
-                // Sortierung: Höchste Verspätung zuerst
+                // Sortierung: Höchste Verspätung zuerst für die Live-Liste
                 trains.sort((a, b) => (parseInt(b.delay) || 0) - (parseInt(a.delay) || 0));
                 
                 let delayedCount = 0;
-                let maxDelay = 0;
-                let worstTrain = null;
 
                 trains.forEach(train => {
                     const delay = parseInt(train.delay) || 0;
@@ -289,11 +289,6 @@
                     if (delay > 0) {
                         delayedCount++;
                         
-                        if (delay > maxDelay) {
-                            maxDelay = delay;
-                            worstTrain = train;
-                        }
-
                         // TripID splitten (Erwartet Format: NAME_ZIEL)
                         const trainName = train.trip_id.includes('_') ? train.trip_id.split('_')[0] : train.trip_id;
 
@@ -348,11 +343,13 @@
 
                 // UI Updates
                 countDisplay.innerText = delayedCount;
-                if (worstTrain) {
-                    const worstName = worstTrain.trip_id.split('_')[0];
-                    worstDisplay.innerHTML = `<strong>Grösste Verspätung: +${maxDelay} Min</strong><br>${worstName} nach ${worstTrain.destination}`;
+                
+                // Anzeige der grössten Verspätung direkt aus dem Archiv-Objekt
+                if (archiveWorst) {
+                    const worstName = archiveWorst.trip_id.includes('_') ? archiveWorst.trip_id.split('_')[0] : archiveWorst.trip_id;
+                    worstDisplay.innerHTML = `<strong>Historisches Maximum: +${archiveWorst.delay} Min</strong><br>${worstName} von ${archiveWorst.origin} nach ${archiveWorst.destination}`;
                 } else {
-                    worstDisplay.innerHTML = "Aktuell keine Verspätungen gemeldet.";
+                    worstDisplay.innerHTML = "Aktuell keine historischen Daten verfügbar.";
                 }
 
                 if (delayedCount === 0) {

@@ -2,7 +2,8 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
 import mysql.connector
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 CORS(app)
@@ -18,12 +19,18 @@ ARCHIVE_DELAY_THRESHOLD = 20
 
 def parse_departure(raw: str | None) -> str | None:
     """Parse ISO 8601 departure string from the transport API.
-    Keeps CEST local time — no UTC conversion. Returns MySQL-compatible string."""
+    Converts local Swiss time to absolute UTC. Returns naive MySQL-compatible string."""
     if not raw:
         return None
     try:
-        dt = datetime.fromisoformat(raw)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        # 1. Parsen des Strings in ein timezone-aware datetime Objekt (inkl. +02:00 Offset)
+        dt_aware = datetime.fromisoformat(raw)
+        
+        # 2. Umrechnung in die absolute UTC-Zeit
+        dt_utc = dt_aware.astimezone(timezone.utc)
+        
+        # 3. Formatierung als naiver String für den MySQL-Insert
+        return dt_utc.strftime("%Y-%m-%d %H:%M:%S")
     except (ValueError, TypeError):
         return None
 
@@ -85,7 +92,7 @@ def sync_trains():
             ON DUPLICATE KEY UPDATE
                 delay          = VALUES(delay),
                 departure_time = VALUES(departure_time),
-                recorded_at    = CURRENT_TIMESTAMP
+                recorded_at    = UTC_TIMESTAMP
         """
 
         sync_count = 0
@@ -143,31 +150,45 @@ def view_live():
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor(dictionary=True)
+
         cursor.execute("""
-            SELECT
-                trip_id,
-                origin,
-                destination,
-                delay,
-                departure_time,
-                CAST(latitude  AS CHAR) AS latitude,
-                CAST(longitude AS CHAR) AS longitude
+            SELECT trip_id, origin, destination, delay, departure_time,
+                CAST(latitude AS CHAR) AS latitude, CAST(longitude AS CHAR) AS longitude
             FROM active_trains
-            WHERE departure_time IS NULL
-               OR departure_time >= NOW() - INTERVAL 60 MINUTE
+            WHERE (departure_time IS NULL OR departure_time >= UTC_TIMESTAMP() - INTERVAL 60 MINUTE)
+                AND departure_time <= UTC_TIMESTAMP() + INTERVAL 30 MINUTE
         """)
-        data: list[dict] = cursor.fetchall()
+        live_trains = cursor.fetchall()
+
+        cursor.execute("SELECT * FROM delay_archive ORDER BY delay DESC LIMIT 1")
+        archive_worst = cursor.fetchone()
+
         cursor.close()
         conn.close()
 
-        for row in data:
-            row['latitude'] = float(row['latitude']) if row['latitude'] else 0.0
-            row['longitude'] = float(row['longitude']) if row['longitude'] else 0.0
-            # departure_time is a datetime object from the driver; serialise to ISO 8601
-            dt = row.get('departure_time')
-            row['departure_time'] = dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else None
+        # Zeitzonen-Setup
+        zurich_tz = ZoneInfo("Europe/Zurich")
 
-        return jsonify(data), 200
+        # Konvertierung für Live-Züge
+        for train in live_trains:
+            if train['departure_time']:
+                # 1. Dem naiven Objekt sagen, dass es UTC ist
+                utc_dt = train['departure_time'].replace(tzinfo=timezone.utc)
+                # 2. In lokale Schweizer Zeit umwandeln
+                local_dt = utc_dt.astimezone(zurich_tz)
+                # 3. Als lesbaren String für das Frontend formatieren
+                train['departure_time'] = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Konvertierung für das Archiv-Element (falls vorhanden)
+        if archive_worst and archive_worst['departure_time']:
+            utc_dt = archive_worst['departure_time'].replace(tzinfo=timezone.utc)
+            local_dt = utc_dt.astimezone(zurich_tz)
+            archive_worst['departure_time'] = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        return jsonify({
+            "live_trains": live_trains,
+            "archive_worst": archive_worst
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
