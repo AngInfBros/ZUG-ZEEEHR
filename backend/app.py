@@ -80,8 +80,11 @@ def sync_trains():
                 (trip_id, origin, destination, delay, departure_time, latitude, longitude)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
+                origin         = VALUES(origin),
                 delay          = VALUES(delay),
                 departure_time = VALUES(departure_time),
+                latitude       = VALUES(latitude),
+                longitude      = VALUES(longitude),
                 updated_at     = CURRENT_TIMESTAMP
         """
 
